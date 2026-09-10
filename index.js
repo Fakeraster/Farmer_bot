@@ -1,7 +1,6 @@
 const express = require('express');
 require('dotenv').config();
 const axios = require('axios');
-const { google } = require('googleapis');
 const mongoose = require('mongoose');
 
 const app = express();
@@ -10,9 +9,8 @@ app.use(express.json());
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'farmer_app_token_2026';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1307599989103567';
-const SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GOOGLE_CREDS = process.env.GOOGLE_CREDS_JSON;
 const MONGODB_URI = process.env.MONGODB_URI;
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // New FREE way to save to Sheets
 
 // --- MongoDB Setup ---
 const farmerSchema = new mongoose.Schema({
@@ -29,32 +27,35 @@ async function connectDB() {
 }
 connectDB();
 
-// --- Google Sheets Save (FULL ROW) ---
+// --- FREE Google Apps Script Save Function ---
 async function saveToSheet(phone, data) {
-  if (!SHEET_ID || !GOOGLE_CREDS) return console.log('No Sheet config, skipping save.');
+  if (!APPS_SCRIPT_URL) return console.log('No Apps Script URL set, skipping save.');
   try {
-    const creds = JSON.parse(GOOGLE_CREDS);
-    const auth = new google.auth.GoogleAuth({ credentials: creds, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-    const sheets = google.sheets({ version: 'v4', auth });
-    const now = new Date().toISOString();
-    
-    const row = [
-      now, phone, data.name || '', data.id || '', data.manager || '', data.permit || '', 
-      data.contact || '', data.email || '', data.gps || '', data.province || '', 
-      data.district || '', data.municipality || '', data.farmSize || '', data.hempAmount || '', 
-      data.plot?.lat || '', data.plot?.long || '', data.plot?.area || ''
-    ];
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
-      range: 'Sheet1!A:Q', // Matches the 17 columns
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] }
+    await axios.post(APPS_SCRIPT_URL, {
+      phone: phone,
+      name: data.name || '',
+      id: data.id || '',
+      manager: data.manager || '',
+      permit: data.permit || '',
+      contact: data.contact || '',
+      email: data.email || '',
+      gps: data.gps || '',
+      province: data.province || '',
+      district: data.district || '',
+      municipality: data.municipality || '',
+      farmSize: data.farmSize || '',
+      hempAmount: data.hempAmount || '',
+      plotLat: data.plot?.lat || '',
+      plotLong: data.plot?.long || '',
+      plotArea: data.plot?.area || ''
     });
-    console.log('SAVED TO SHEET:', row);
-  } catch (e) { console.error('Sheet save failed:', e.message); }
+    console.log('✅ SAVED TO SHEET via Apps Script!');
+  } catch (e) {
+    console.error('Sheet save failed:', e.message);
+  }
 }
 
+// --- Send WhatsApp ---
 async function sendWhatsApp(to, text) {
   try {
     const url = `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`;
@@ -65,7 +66,8 @@ async function sendWhatsApp(to, text) {
   } catch (e) { console.error('Send failed:', e.response?.data || e.message); }
 }
 
-app.get('/', (req,res) => res.send('Farmer Bot Live - Full Workbook'));
+// --- Webhook Routes ---
+app.get('/', (req,res) => res.send('Farmer Bot Live - Apps Script Version'));
 app.get('/webhook', (req,res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     return res.status(200).send(req.query['hub.challenge']);
@@ -85,6 +87,7 @@ app.post('/webhook', async (req,res) => {
 
   let reply = '';
 
+  // --- FULL 12-STEP FARMER PROFILE WORKFLOW ---
   if (farmer.state === 'idle') {
     if (['hi', 'hello', 'register'].includes(text.toLowerCase())) {
       farmer.state = 'profile_name'; farmer.data = {};
