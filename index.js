@@ -10,7 +10,7 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'farmer_app_token_2026';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1307599989103567';
 const MONGODB_URI = process.env.MONGODB_URI;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // New FREE way to save to Sheets
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 
 // --- MongoDB Setup ---
 const farmerSchema = new mongoose.Schema({
@@ -31,6 +31,7 @@ connectDB();
 async function saveToSheet(phone, data) {
   if (!APPS_SCRIPT_URL) return console.log('No Apps Script URL set, skipping save.');
   try {
+    console.log('SENDING TO SHEET:', JSON.stringify(data)); // <--- Check Render logs for this line!
     await axios.post(APPS_SCRIPT_URL, {
       phone: phone,
       name: data.name || '',
@@ -67,7 +68,7 @@ async function sendWhatsApp(to, text) {
 }
 
 // --- Webhook Routes ---
-app.get('/', (req,res) => res.send('Farmer Bot Live - Apps Script Version'));
+app.get('/', (req,res) => res.send('Farmer Bot Live'));
 app.get('/webhook', (req,res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     return res.status(200).send(req.query['hub.challenge']);
@@ -87,59 +88,58 @@ app.post('/webhook', async (req,res) => {
 
   let reply = '';
 
-  // --- FULL 12-STEP FARMER PROFILE WORKFLOW ---
   if (farmer.state === 'idle') {
     if (['hi', 'hello', 'register'].includes(text.toLowerCase())) {
       farmer.state = 'profile_name'; farmer.data = {};
-      reply = 'Welcome to Ukumilaweuthu! 🌾\n\nWe need to capture your full farm profile.\n\n1. What is your FULL NAME?';
+      reply = 'Welcome to Ukumilaweuthu! 🌾\n\n1. What is your FULL NAME?';
     } else reply = 'Welcome! Type "Register" to start.';
   }
   else if (farmer.state === 'profile_name') {
-    farmer.data.name = text; farmer.state = 'profile_id';
+    farmer.data.name = text; farmer.markModified('data'); farmer.state = 'profile_id';
     reply = `Thanks ${text}!\n\n2. ID Number?`;
   }
   else if (farmer.state === 'profile_id') {
-    farmer.data.id = text; farmer.state = 'profile_manager';
+    farmer.data.id = text; farmer.markModified('data'); farmer.state = 'profile_manager';
     reply = '3. Name of Farm Manager/Supervisor?';
   }
   else if (farmer.state === 'profile_manager') {
-    farmer.data.manager = text; farmer.state = 'profile_permit';
+    farmer.data.manager = text; farmer.markModified('data'); farmer.state = 'profile_permit';
     reply = '4. Hemp Permit Number?';
   }
   else if (farmer.state === 'profile_permit') {
-    farmer.data.permit = text; farmer.state = 'profile_contact';
+    farmer.data.permit = text; farmer.markModified('data'); farmer.state = 'profile_contact';
     reply = '5. Contact Number?';
   }
   else if (farmer.state === 'profile_contact') {
-    farmer.data.contact = text; farmer.state = 'profile_email';
+    farmer.data.contact = text; farmer.markModified('data'); farmer.state = 'profile_email';
     reply = '6. Email?';
   }
   else if (farmer.state === 'profile_email') {
-    farmer.data.email = text; farmer.state = 'profile_gps';
+    farmer.data.email = text; farmer.markModified('data'); farmer.state = 'profile_gps';
     reply = '7. Farm GPS Coordinates? (e.g. -25.123, 27.456)';
   }
   else if (farmer.state === 'profile_gps') {
-    farmer.data.gps = text; farmer.state = 'profile_province';
+    farmer.data.gps = text; farmer.markModified('data'); farmer.state = 'profile_province';
     reply = '8. Province?';
   }
   else if (farmer.state === 'profile_province') {
-    farmer.data.province = text; farmer.state = 'profile_district';
+    farmer.data.province = text; farmer.markModified('data'); farmer.state = 'profile_district';
     reply = '9. District?';
   }
   else if (farmer.state === 'profile_district') {
-    farmer.data.district = text; farmer.state = 'profile_municipality';
+    farmer.data.district = text; farmer.markModified('data'); farmer.state = 'profile_municipality';
     reply = '10. Municipality?';
   }
   else if (farmer.state === 'profile_municipality') {
-    farmer.data.municipality = text; farmer.state = 'profile_size';
+    farmer.data.municipality = text; farmer.markModified('data'); farmer.state = 'profile_size';
     reply = '11. Farm Size (ha)?';
   }
   else if (farmer.state === 'profile_size') {
-    farmer.data.farmSize = text; farmer.state = 'profile_hemp';
+    farmer.data.farmSize = text; farmer.markModified('data'); farmer.state = 'profile_hemp';
     reply = '12. Amount allocated to hemp 2026/27 season (ha)?';
   }
   else if (farmer.state === 'profile_hemp') {
-    farmer.data.hempAmount = text; farmer.state = 'ask_plot';
+    farmer.data.hempAmount = text; farmer.markModified('data'); farmer.state = 'ask_plot';
     reply = `✅ Profile saved!\n\nWould you like to add Plot details (GPS, Area)?\nType "Yes" or "No".`;
   }
   else if (farmer.state === 'ask_plot') {
@@ -153,15 +153,15 @@ app.post('/webhook', async (req,res) => {
     }
   }
   else if (farmer.state === 'plot_lat') {
-    farmer.data.plot = { lat: text }; farmer.state = 'plot_long';
+    farmer.data.plot = { lat: text }; farmer.markModified('data'); farmer.state = 'plot_long';
     reply = 'Enter Plot Longitude*:';
   }
   else if (farmer.state === 'plot_long') {
-    farmer.data.plot.long = text; farmer.state = 'plot_area';
+    farmer.data.plot.long = text; farmer.markModified('data'); farmer.state = 'plot_area';
     reply = 'Enter Plot Area (ha):';
   }
   else if (farmer.state === 'plot_area') {
-    farmer.data.plot.area = text;
+    farmer.data.plot.area = text; farmer.markModified('data');
     await saveToSheet(from, farmer.data);
     farmer.state = 'idle';
     reply = `✅ Plot saved! Your full registration is complete.`;
