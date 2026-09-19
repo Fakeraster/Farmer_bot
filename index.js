@@ -11,6 +11,7 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '1307599989103567';
 const MONGODB_URI = process.env.MONGODB_URI;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
+const FLOW_ID = process.env.FLOW_ID;
 
 // --- MongoDB Setup ---
 const farmerSchema = new mongoose.Schema({
@@ -146,7 +147,7 @@ async function saveToSheet(phone, data) {
   }
 }
 
-// --- Send WhatsApp ---
+// --- Send WhatsApp Text ---
 async function sendWhatsApp(to, text) {
   try {
     const url = `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`;
@@ -157,6 +158,41 @@ async function sendWhatsApp(to, text) {
   } catch (e) { console.error('Send failed:', e.response?.data || e.message); }
 }
 
+// --- Send WhatsApp Flow (Currently blocked by Meta, but kept for later) ---
+async function sendWhatsAppFlow(to, flowId) {
+  try {
+    const url = `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`;
+    await axios.post(url, {
+      messaging_product: 'whatsapp',
+      to: to,
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: { text: 'Please fill in your farm registration details below:' },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_message_version: '3',
+            flow_id: flowId,
+            flow_cta: 'Register Now',
+            flow_action: 'navigate',
+            flow_action_payload: {
+              screen: 'WELCOME',
+              data: {}
+            }
+          }
+        }
+      }
+    }, {
+      headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' }
+    });
+    console.log('Flow sent successfully');
+  } catch (e) {
+    console.error('Flow send failed:', e.response?.data || e.message);
+  }
+}
+
+// --- Webhook Routes ---
 app.get('/', (req,res) => res.send('Farmer Bot Live - Multilingual'));
 app.get('/webhook', (req,res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
@@ -176,24 +212,35 @@ app.post('/webhook', async (req,res) => {
   if (!farmer) { farmer = new Farmer({ phone: from, state: 'idle', data: {} }); }
 
   let reply = '';
-  // Default to English if no language set
   const lang = farmer.data.lang || 'en';
   const t = translations[lang];
 
   if (farmer.state === 'idle') {
     if (['hi', 'hello', 'register'].includes(text.toLowerCase())) {
       farmer.state = 'set_language';
+      farmer.data = {}; // Reset data
       reply = translations.en.welcome; // Always show English first for the menu
     } else {
       reply = 'Welcome! Type "Register" to start.';
     }
   }
   else if (farmer.state === 'set_language') {
-    if (text === '1' || text.toLowerCase() === 'english') { farmer.data.lang = 'en'; farmer.state = 'profile_name'; reply = t.askName; }
-    else if (text === '2' || text.toLowerCase() === 'isizulu') { farmer.data.lang = 'zu'; farmer.state = 'profile_name'; reply = t.askName; }
-    else if (text === '3' || text.toLowerCase() === 'afrikaans') { farmer.data.lang = 'af'; farmer.state = 'profile_name'; reply = t.askName; }
-    else if (text === '4' || text.toLowerCase() === 'sesotho') { farmer.data.lang = 'st'; farmer.state = 'profile_name'; reply = t.askName; }
-    else { reply = translations.en.invalidLang; }
+    let selectedLang = 'en';
+    if (text === '1' || text.toLowerCase() === 'english') selectedLang = 'en';
+    else if (text === '2' || text.toLowerCase() === 'isizulu') selectedLang = 'zu';
+    else if (text === '3' || text.toLowerCase() === 'afrikaans') selectedLang = 'af';
+    else if (text === '4' || text.toLowerCase() === 'sesotho') selectedLang = 'st';
+    else {
+      reply = translations.en.invalidLang; 
+      return await sendWhatsApp(from, reply);
+    }
+
+    farmer.data.lang = selectedLang;
+    farmer.markModified('data');
+    farmer.state = 'profile_name';
+    
+    // THE FIX: Use the translation directly from the selected language
+    reply = translations[selectedLang].askName; 
   }
   // --- PROFILE SECTION ---
   else if (farmer.state === 'profile_name') {
@@ -271,7 +318,7 @@ app.post('/webhook', async (req,res) => {
   }
 
   await farmer.save();
-  await sendWhatsApp(from, reply);
+  if (reply) await sendWhatsApp(from, reply); 
 });
 
 app.listen(process.env.PORT || 10000, () => console.log('Server running on port ' + (process.env.PORT || 10000)));
