@@ -49,7 +49,8 @@ const translations = {
     askPlot2: "For PLOT 2, please provide the same details (or type 'skip' if you only have one plot).",
     askPlot3: "For PLOT 3, please provide the same details (or type 'skip').",
     done: "✅ Thank you! Your registration and farm data have been saved.",
-    invalidLang: "Invalid choice. Please reply with 1, 2, 3, or 4."
+    invalidLang: "Invalid choice. Please reply with 1, 2, 3, or 4.",
+    cancelled: "🔄 Your registration has been reset. Type 'Register' to start again."
   },
   zu: {
     welcome: "Siyakwamukela e-Ukumilaweuthu! 🌾\n\nSicela ukhethe ulimi lwakho:\n1. English\n2. isiZulu\n3. Afrikaans\n4. Sesotho",
@@ -70,7 +71,8 @@ const translations = {
     askPlot2: "Kwi-PLOT 2, sicela unikeze imininingwane efanayo (noma uthayiphe 'skip').",
     askPlot3: "Kwi-PLOT 3, sicela unikeze imininingwane efanayo (noma uthayiphe 'skip').",
     done: "✅ Ngiyabonga! Ukubhalisa kwakho nedatha yepulazi kulondoloziwe.",
-    invalidLang: "Ukukhetha okungalungile. Sicela uphendule ngo-1, 2, 3, noma 4."
+    invalidLang: "Ukukhetha okungalungile. Sicela uphendule ngo-1, 2, 3, noma 4.",
+    cancelled: "🔄 Ukubhalisa kwakho kususwe. Thayipha 'Register' ukuqala futhi."
   },
   af: {
     welcome: "Welkom by Ukumilaweuthu! 🌾\n\nKies asseblief jou taal:\n1. English\n2. isiZulu\n3. Afrikaans\n4. Sesotho",
@@ -91,7 +93,8 @@ const translations = {
     askPlot2: "Vir PERSEEL 2, verskaf asseblief dieselfde besonderhede (of tik 'skip').",
     askPlot3: "Vir PERSEEL 3, verskaf asseblief dieselfde besonderhede (of tik 'skip').",
     done: "✅ Dankie! Jou registrasie en plaasdata is gestoor.",
-    invalidLang: "Ongeldige keuse. Antwoord asseblief met 1, 2, 3, of 4."
+    invalidLang: "Ongeldige keuse. Antwoord asseblief met 1, 2, 3, of 4.",
+    cancelled: "🔄 Jou registrasie is herstel. Tik 'Register' om weer te begin."
   },
   st: {
     welcome: "Rea u amohela ho Ukumilaweuthu! 🌾\n\nKa kopo khetha puo ea hau:\n1. English\n2. isiZulu\n3. Afrikaans\n4. Sesotho",
@@ -112,7 +115,8 @@ const translations = {
     askPlot2: "Bakeng sa PLOT 2, ka kopo fana ka lintlha tse tšoanang (kapa ngola 'skip').",
     askPlot3: "Bakeng sa PLOT 3, ka kopo fana ka lintlha tse tšoanang (kapa ngola 'skip').",
     done: "✅ Kea leboha! Ngoliso ea hau le data ea polasi li bolokiloe.",
-    invalidLang: "Khetho e fosahetseng. Ka kopo araba ka 1, 2, 3, kapa 4."
+    invalidLang: "Khetho e fosahetseng. Ka kopo araba ka 1, 2, 3, kapa 4.",
+    cancelled: "🔄 Ngoliso ea hau e hlakotsoe. Ngola 'Register' ho qala hape."
   }
 };
 
@@ -158,7 +162,7 @@ async function sendWhatsApp(to, text) {
   } catch (e) { console.error('Send failed:', e.response?.data || e.message); }
 }
 
-// --- Send WhatsApp Flow (Currently blocked by Meta, but kept for later) ---
+// --- Send WhatsApp Flow (Blocked by Meta integrity, kept for later) ---
 async function sendWhatsAppFlow(to, flowId) {
   try {
     const url = `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`;
@@ -215,13 +219,24 @@ app.post('/webhook', async (req,res) => {
   const lang = farmer.data.lang || 'en';
   const t = translations[lang];
 
+  // --- CANCEL / RESTART COMMAND (works at any time) ---
+  if (['cancel', 'restart', 'start over'].includes(text.toLowerCase())) {
+    farmer.state = 'idle';
+    farmer.data = {};
+    farmer.markModified('data');
+    await farmer.save();
+    reply = t.cancelled + '\n\n' + translations.en.welcome;
+    return await sendWhatsApp(from, reply);
+  }
+  // ---------------------------------------------------
+
   if (farmer.state === 'idle') {
     if (['hi', 'hello', 'register'].includes(text.toLowerCase())) {
       farmer.state = 'set_language';
       farmer.data = {}; // Reset data
       reply = translations.en.welcome; // Always show English first for the menu
     } else {
-      reply = 'Welcome! Type "Register" to start.';
+      reply = 'Welcome! Type "Register" to start, or "Cancel" to reset.';
     }
   }
   else if (farmer.state === 'set_language') {
@@ -239,7 +254,7 @@ app.post('/webhook', async (req,res) => {
     farmer.markModified('data');
     farmer.state = 'profile_name';
     
-    // THE FIX: Use the translation directly from the selected language
+    // Load the correct translation immediately for this reply
     reply = translations[selectedLang].askName; 
   }
   // --- PROFILE SECTION ---
@@ -314,7 +329,7 @@ app.post('/webhook', async (req,res) => {
     reply = t.done;
   }
   else {
-    reply = 'Type "Register" to start.';
+    reply = 'Type "Register" to start, or "Cancel" to reset.';
   }
 
   await farmer.save();
